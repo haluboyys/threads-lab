@@ -39,6 +39,14 @@ export interface PostItem {
   quotes?: number | null;
 }
 
+export interface LiveThreadsPost {
+  id: string;
+  text?: string;
+  media_type?: string;
+  timestamp?: string;
+  permalink?: string;
+}
+
 export interface ThreadsStatus {
   connected: boolean;
   oauthConfigured: boolean;
@@ -119,6 +127,11 @@ export const api = {
   threadsStatus: () => request<ThreadsStatus>('/api/threads/status'),
   threadsConnectUrl: () => request<{ url: string }>('/api/threads/connect'),
   threadsDisconnect: () => request<{ ok: boolean }>('/api/threads/disconnect', { method: 'DELETE' }),
+  listLiveThreads: () => request<{ posts: LiveThreadsPost[] }>('/api/threads/posts'),
+  deleteLiveThread: (threadsPostId: string) =>
+    request<{ ok: boolean }>(`/api/threads/posts/${encodeURIComponent(threadsPostId)}`, {
+      method: 'DELETE',
+    }),
 
   scoreboard: () => request<ScoreboardData>('/api/scoreboard'),
 
@@ -168,8 +181,8 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(payload),
     }),
-  deletePost: (id: string) =>
-    request<{ ok: boolean }>(`/api/posts/${id}`, { method: 'DELETE' }),
+  deletePost: (id: string, remote = false) =>
+    request<{ ok: boolean }>(`/api/posts/${id}${remote ? '?remote=1' : ''}`, { method: 'DELETE' }),
   generateDrafts: (payload: {
     experiment_id: string;
     hook_type: HookType;

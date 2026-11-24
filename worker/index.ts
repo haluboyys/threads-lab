@@ -8,13 +8,19 @@ import {
   verifySession,
 } from './lib/crypto';
 import {
+  getActiveAccessToken,
   publishSinglePost,
   runDailyMaintenance,
   runPublishDuePosts,
   runSyncInsights,
 } from './lib/jobs';
 import { generateHookDrafts } from './lib/llm';
-import { buildThreadsAuthorizeUrl, exchangeCodeForToken } from './lib/threads';
+import {
+  buildThreadsAuthorizeUrl,
+  deleteThreadsPost,
+  exchangeCodeForToken,
+  fetchUserThreads,
+} from './lib/threads';
 
 const SESSION_COOKIE = 'tl_session';
 const OAUTH_STATE_COOKIE = 'tl_oauth_state';
@@ -189,6 +195,34 @@ app.get('/api/threads/connect', async (c) => {
 app.delete('/api/threads/disconnect', async (c) => {
   await c.env.DB.prepare('DELETE FROM threads_auth WHERE id = 1').run();
   return c.json({ ok: true });
+});
+
+app.get('/api/threads/posts', async (c) => {
+  const creds = await getActiveAccessToken(c.env);
+  if (!creds) {
+    return c.json({ error: 'Threads account is not connected' }, 400);
+  }
+  try {
+    const posts = await fetchUserThreads(creds.accessToken, 25);
+    return c.json({ posts });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : 'Failed to fetch Threads posts' }, 400);
+  }
+});
+
+app.delete('/api/threads/posts/:threadsPostId', async (c) => {
+  const threadsPostId = c.req.param('threadsPostId');
+  const creds = await getActiveAccessToken(c.env);
+  if (!creds) {
+    return c.json({ error: 'Threads account is not connected' }, 400);
+  }
+  try {
+    await deleteThreadsPost(creds.accessToken, threadsPostId);
+    await c.env.DB.prepare('DELETE FROM posts WHERE threads_post_id = ?').bind(threadsPostId).run();
+    return c.json({ ok: true });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : 'Failed to delete Threads post' }, 400);
+  }
 });
 
 // --- Scoreboard ---
@@ -494,6 +528,28 @@ app.patch('/api/posts/:id', async (c) => {
 
 app.delete('/api/posts/:id', async (c) => {
   const id = c.req.param('id');
+  const deleteRemote = c.req.query('remote') === '1';
+
+  if (deleteRemote) {
+    const existing = await c.env.DB.prepare('SELECT threads_post_id FROM posts WHERE id = ?')
+      .bind(id)
+      .first<{ threads_post_id: string | null }>();
+    if (existing?.threads_post_id) {
+      const creds = await getActiveAccessToken(c.env);
+      if (!creds) {
+        return c.json({ error: 'Threads account is not connected' }, 400);
+      }
+      try {
+        await deleteThreadsPost(creds.accessToken, existing.threads_post_id);
+      } catch (err) {
+        return c.json(
+          { error: err instanceof Error ? err.message : 'Failed to delete Threads post' },
+          400
+        );
+      }
+    }
+  }
+
   await c.env.DB.prepare('DELETE FROM posts WHERE id = ?').bind(id).run();
   return c.json({ ok: true });
 });
@@ -558,12 +614,18 @@ app.all('/api/*', (c) => c.json({ error: 'Not found' }, 404));
 export default {
   fetch: app.fetch,
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    if (controller.cron === '*/5 * * * *') {
-      ctx.waitUntil(runPublishDuePosts(env));
-    } else if (controller.cron === '0 */2 * * *') {
-      ctx.waitUntil(runSyncInsights(env));
-    } else {
-      ctx.waitUntil(runDailyMaintenance(env));
+    const d = new Date(controller.scheduledTime);
+    const hour = d.getUTCHours();
+    const minute = d.getUTCMinutes();
+
+    const tasks: Array<Promise<unknown>> = [runPublishDuePosts(env)];
+    if (minute === 0 && hour % 2 === 0) {
+      tasks.push(runSyncInsights(env));
     }
+    if (hour === 1 && minute === 0) {
+      tasks.push(runDailyMaintenance(env));
+    }
+
+    ctx.waitUntil(Promise.all(tasks));
   },
 };

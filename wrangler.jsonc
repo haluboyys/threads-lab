@@ -13,15 +13,13 @@
     {
       "binding": "DB",
       "database_name": "threads-lab-db",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "database_id": "2d9ecac9-8a0e-43b9-8eb7-83cff0786ca8",
       "migrations_dir": "migrations"
     }
   ],
   "triggers": {
     "crons": [
-      "*/5 * * * *",
-      "0 */2 * * *",
-      "0 1 * * *"
+      "*/5 * * * *"
     ]
   }
 }

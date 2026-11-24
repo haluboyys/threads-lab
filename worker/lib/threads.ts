@@ -56,7 +56,7 @@ export function buildThreadsAuthorizeUrl(env: Env, state: string): string {
   const params = new URLSearchParams({
     client_id: env.THREADS_APP_ID,
     redirect_uri: env.THREADS_REDIRECT_URI,
-    scope: 'threads_basic,threads_content_publish,threads_manage_insights',
+    scope: 'threads_basic,threads_content_publish,threads_manage_insights,threads_delete',
     response_type: 'code',
     state,
   });
@@ -219,6 +219,40 @@ export async function fetchThreadInsights(
   }
 
   return metrics;
+}
+
+export interface LiveThreadsPost {
+  id: string;
+  text?: string;
+  media_type?: string;
+  timestamp?: string;
+  permalink?: string;
+}
+
+export async function fetchUserThreads(
+  accessToken: string,
+  limit = 25
+): Promise<LiveThreadsPost[]> {
+  const url = new URL(`${THREADS_GRAPH}/v1.0/me/threads`);
+  url.searchParams.set('fields', 'id,media_type,text,timestamp,permalink');
+  url.searchParams.set('limit', String(limit));
+  url.searchParams.set('access_token', accessToken);
+
+  const res = await fetchJson<{ data?: LiveThreadsPost[] }>(url.toString());
+  return res.data ?? [];
+}
+
+export async function deleteThreadsPost(
+  accessToken: string,
+  threadsPostId: string
+): Promise<{ success: boolean }> {
+  const url = new URL(`${THREADS_GRAPH}/v1.0/${encodeURIComponent(threadsPostId)}`);
+  url.searchParams.set('access_token', accessToken);
+
+  await fetchJson<{ success?: boolean }>(url.toString(), {
+    method: 'DELETE',
+  });
+  return { success: true };
 }
 
 export const defaultThreadsPublisher: ThreadsPublisher = {
